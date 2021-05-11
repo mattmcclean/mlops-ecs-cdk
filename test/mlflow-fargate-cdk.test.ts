@@ -1,11 +1,11 @@
 import { expect as expectCDK, matchTemplate, MatchStyle } from '@aws-cdk/assert';
 import * as cdk from '@aws-cdk/core';
-import * as MlflowFargateCdk from '../lib/mlflow-fargate-cdk-stack';
+import * as MlflowFargateBaseStack from '../lib/mlflow-fargate-base-stack';
 
 test('Empty Stack', () => {
     const app = new cdk.App();
     // WHEN
-    const stack = new MlflowFargateCdk.MlflowFargateCdkStack(app, 'MyTestStack');
+    const stack = new MlflowFargateBaseStack.MlflowFargateBaseStack(app, 'MyTestStack');
     // THEN
     expectCDK(stack).to(matchTemplate({
       "Resources": {}
