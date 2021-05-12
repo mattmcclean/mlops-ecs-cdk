@@ -1,8 +1,8 @@
 {
-  "name": "mlflow-fargate-cdk",
+  "name": "mlops-ecs-cdk",
   "version": "0.1.0",
   "bin": {
-    "mlflow-fargate-cdk": "bin/mlflow-fargate-cdk.js"
+    "mlops-ecs-cdk": "bin/mlops-ecs-cdk.js"
   },
   "scripts": {
     "build": "tsc",

@@ -12,7 +12,7 @@ import * as route53 from '@aws-cdk/aws-route53';
 import { DockerImageAsset } from "@aws-cdk/aws-ecr-assets";
 import { join } from "path";
 
-export interface MlflowFargateAlbStackProps extends cdk.StackProps {
+export interface MLOpsEcsMlflowStackProps extends cdk.StackProps {
   
   s3Bucket: s3.IBucket;
 
@@ -33,8 +33,8 @@ export interface MlflowFargateAlbStackProps extends cdk.StackProps {
   hostedZoneId: string;
 }
 
-export class MlflowFargateAlbStack extends cdk.Stack {
-  constructor(scope: cdk.Construct, id: string, props: MlflowFargateAlbStackProps) {
+export class MLOpsEcsMlflowStack extends cdk.Stack {
+  constructor(scope: cdk.Construct, id: string, props: MLOpsEcsMlflowStackProps) {
     super(scope, id, props);
 
     // The Docker Image  
@@ -45,6 +45,7 @@ export class MlflowFargateAlbStack extends cdk.Stack {
     // Load the Certificate for HTTPS
     const certificate = acm.Certificate.fromCertificateArn(this, 'Certificate', props.certificateArn);    
 
+    // get the domain name combining the base name and the service name
     const dnsName = props.serviceName + "." + props.baseDomainName;
 
     // Load the Route 53 hosted zone
@@ -93,7 +94,7 @@ export class MlflowFargateAlbStack extends cdk.Stack {
       readOnly: false,
     });
 
-    //const efsSecurityGroup = ec2.SecurityGroup.fromSecurityGroupId(this, "EfsSecurityGroup", cdk.Fn.importValue("EfsSecurityGroupId"));
+    // get the EFS security group
     const efsSecurityGroup = ec2.SecurityGroup.fromSecurityGroupId(this, "EfsSecurityGroup", props.efsSecurityGroup.securityGroupId);
 
     // The load balanced service    
@@ -136,10 +137,7 @@ export class MlflowFargateAlbStack extends cdk.Stack {
       generateSecret: true,
     });
 
-    // Create a Security Group to allow ALB to talk to Cognito
-    //const albSecurityGroup = new ec2.SecurityGroup(this, "AlbSecurityGroup", { vpc: props.vpc, allowAllOutbound: false });
-    //albSecurityGroup.addEgressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), 'Required by Idp Auth (cognito)');
-    //fargateService.loadBalancer.addSecurityGroup(albSecurityGroup);
+    // Allow ALB to talk to any service running HTTPS (for Cognito)
     fargateService.loadBalancer.connections.allowToAnyIpv4(ec2.Port.tcp(443));
 
     // Get the AWS CloudFormation resource

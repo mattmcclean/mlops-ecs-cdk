@@ -2,8 +2,8 @@
 import 'source-map-support/register';
 import * as cdk from '@aws-cdk/core';
 
-import { MlflowFargateBaseStack } from '../lib/mlflow-fargate-base-stack';
-import { MlflowFargateAlbStack } from '../lib/mlflow-fargate-alb-stack';
+import { MLOpsEcsBaseStack } from '../lib/mlops-ecs-base-stack';
+import { MLOpsEcsMlflowStack } from '../lib/mlops-ecs-mlflow-stack';
 
 const app = new cdk.App();
 
@@ -18,12 +18,12 @@ const env = {
  
 const baseDomainName = "ml.hyper-ski.com";
 
-const baseStack = new MlflowFargateBaseStack(app, 'MLOps-BaseStack', { 
+const baseStack = new MLOpsEcsBaseStack(app, 'MLOps-Base-Stack', { 
   domainName: baseDomainName, 
   env,
 });
 
-const albStack = new MlflowFargateAlbStack(app, 'MLOps-AlbStack', {
+const albStack = new MLOpsEcsMlflowStack(app, 'MLOps-Mlflow-Stack', {
   vpc: baseStack.vpc,
   cluster: baseStack.cluster,
   s3Bucket: baseStack.s3Bucket,

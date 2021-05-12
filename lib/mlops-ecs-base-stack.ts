@@ -4,16 +4,14 @@ import * as cognito from '@aws-cdk/aws-cognito';
 import * as ec2 from '@aws-cdk/aws-ec2';
 import * as efs from '@aws-cdk/aws-efs';
 import * as ecs from '@aws-cdk/aws-ecs';
-import * as servicediscovery from '@aws-cdk/aws-servicediscovery';
 
-export interface MlflowFargateBaseStackProps extends cdk.StackProps {
+export interface MLOpsEcsBaseStackProps extends cdk.StackProps {
 
   readonly domainName: string;    
 
 }
 
-
-export class MlflowFargateBaseStack extends cdk.Stack {
+export class MLOpsEcsBaseStack extends cdk.Stack {
 
   public readonly vpc: ec2.IVpc;
 
@@ -29,7 +27,7 @@ export class MlflowFargateBaseStack extends cdk.Stack {
 
   public readonly userPoolDomain: cognito.IUserPoolDomain;
 
-  constructor(scope: cdk.Construct, id: string, props: MlflowFargateBaseStackProps) {
+  constructor(scope: cdk.Construct, id: string, props: MLOpsEcsBaseStackProps) {
     super(scope, id, props);
 
     // get the default VPC
