@@ -9,3 +9,4 @@ cdk.out
 
 # custom dirs
 mlruns
+package-lock.json

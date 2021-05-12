@@ -1,6 +1,6 @@
 # Welcome to your CDK TypeScript project!
 
-This is a blank project for TypeScript development with CDK.
+A sample demo MLOps project with MLFlow and Tensorboard pulled together with the AWS CDK
 
 The `cdk.json` file tells the CDK Toolkit how to execute your app.
 
