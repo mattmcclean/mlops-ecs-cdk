@@ -23,7 +23,7 @@ const baseStack = new MLOpsEcsBaseStack(app, 'MLOps-Base-Stack', {
   env,
 });
 
-const albStack = new MLOpsEcsMlflowStack(app, 'MLOps-Mlflow-Stack', {
+const mlflowStack = new MLOpsEcsMlflowStack(app, 'MLOps-Mlflow-Stack', {
   vpc: baseStack.vpc,
   cluster: baseStack.cluster,
   s3Bucket: baseStack.s3Bucket,
@@ -36,4 +36,4 @@ const albStack = new MLOpsEcsMlflowStack(app, 'MLOps-Mlflow-Stack', {
   env,    
 });
 
-albStack.addDependency(baseStack);
+mlflowStack.addDependency(baseStack);

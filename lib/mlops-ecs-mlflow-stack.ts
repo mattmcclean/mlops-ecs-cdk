@@ -39,7 +39,7 @@ export class MLOpsEcsMlflowStack extends cdk.Stack {
 
     // The Docker Image  
     const image = new DockerImageAsset(this, "MlflowImage", {
-      directory: join(__dirname, "..", "docker"),
+      directory: join(__dirname, "..", "docker", "mlflow"),
     });
 
     // Load the Certificate for HTTPS
@@ -101,9 +101,9 @@ export class MLOpsEcsMlflowStack extends cdk.Stack {
     const fargateService = new ecs_patterns.ApplicationLoadBalancedFargateService(this, 'FargateAlbService', {
       cluster: props.cluster,
       desiredCount: 1,
-      publicLoadBalancer: true,
       certificate,
       domainName: dnsName,
+      publicLoadBalancer: true,
       domainZone,
       redirectHTTP: true,      
       taskDefinition,
