@@ -87,6 +87,18 @@ export class MLOpsEcsBaseStack extends cdk.Stack {
       },
     }); 
 
+    //  Create the Ray Security Group
+    const raySecurityGroup = new ec2.SecurityGroup(this, "RaySecurityGroup", {
+      vpc: this.vpc,
+    });
+    raySecurityGroup.addIngressRule(raySecurityGroup, ec2.Port.allTraffic(), "Ray security group");
+    raySecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(22), "Allow SSH from anyone");
+
+    // Create a CFN output for the Ray Security Group
+    new cdk.CfnOutput(this, 'RaySecurityGroupOutput', {
+      value: raySecurityGroup.securityGroupId,
+    });
+
     // Create a CFN output for the Cognito User Pool
     new cdk.CfnOutput(this, 'CognitoUserPoolArnOutput', {
       value: this.userPool.userPoolArn,
