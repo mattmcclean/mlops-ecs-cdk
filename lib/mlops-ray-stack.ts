@@ -5,7 +5,6 @@ import * as cognito from '@aws-cdk/aws-cognito';
 import * as iam from '@aws-cdk/aws-iam';
 import * as ec2 from '@aws-cdk/aws-ec2';
 import * as efs from '@aws-cdk/aws-efs';
-import * as ecs from '@aws-cdk/aws-ecs';
 import * as elbv2 from '@aws-cdk/aws-elasticloadbalancingv2';
 import * as acm from '@aws-cdk/aws-certificatemanager';
 import * as lambda from '@aws-cdk/aws-lambda';
@@ -16,6 +15,9 @@ import * as route53 from '@aws-cdk/aws-route53';
 
 import { join } from "path";
 
+/**
+ * The ports for each MLOps application.
+ */
 export enum MlOpsPorts {
 
   MLFLOW = 5000,
@@ -28,6 +30,9 @@ export enum MlOpsPorts {
 
 };
 
+/**
+ * The names of each MLOps application.
+ */
 export enum MlopsApps {
 
   MLFLOW = "mlflow",
@@ -187,6 +192,7 @@ export class MLOpsRayStack extends cdk.Stack {
         defaultTargetGroups: [dashboardTargetGroup ],
     });
 
+    // Create an action per application
     listener.addAction('MLFlowAction', {
       priority: 30,
       conditions: [
@@ -293,6 +299,7 @@ export class MLOpsRayStack extends cdk.Stack {
       }
     ));
 
+    // create an event bridge rule to receive EC2 instance state notifications
     const rule = new events.Rule(this, 'rule', {
         eventPattern: {
             source: ["aws.ec2"],
@@ -300,11 +307,13 @@ export class MLOpsRayStack extends cdk.Stack {
         },
     });
       
+    // add the Lambda funtion as a target for the Event Bridge rule
     rule.addTarget(new targets.LambdaFunction(fn, {
         maxEventAge: cdk.Duration.hours(2), // Optional: set the maxEventAge retry policy
         retryAttempts: 2, // Optional: set the max number of retry attempts
     }));      
-    
+
+    // Define the CFN outputs    
     new cdk.CfnOutput(this, "S3Bucket", {
       value: s3Bucket.bucketName,
     });
@@ -319,6 +328,14 @@ export class MLOpsRayStack extends cdk.Stack {
 
   }
 
+  /**
+   * Create the Cognito User Pool Client for one of the applications
+   * 
+   * @param name - the name of the application. 
+   * @param userPool - the Cognito user pool.
+   * @param baseDomain - the base DNS domain name.
+   * @returns a new Cognito User Pool Client resource
+   */
   private _createUserPoolClient(name: string, userPool: cognito.UserPool, baseDomain: string) {
 
     // Create Cognito User Pool clients for each endpoint
