@@ -16,16 +16,6 @@ import * as route53 from '@aws-cdk/aws-route53';
 
 import { join } from "path";
 
-export interface MLOpsRayStackProps extends cdk.StackProps {
-
-  readonly domainName: string;    
-
-  readonly certificateArn: string;
-
-  readonly hostedZone: string;
-
-}
-
 export enum MlOpsPorts {
 
   MLFLOW = 5000,
@@ -52,8 +42,24 @@ export enum MlopsApps {
 
 export class MLOpsRayStack extends cdk.Stack {
 
-  constructor(scope: cdk.Construct, id: string, props: MLOpsRayStackProps) {
+  constructor(scope: cdk.Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
+
+    // get the input parameters
+    const domainName = new cdk.CfnParameter(this, "DomainName", {
+      type: "String",
+      description: "The base DNS domain name."
+    });
+
+    const certificateArn = new cdk.CfnParameter(this, "CertificateArn", {
+      type: "String",
+      description: "The Amazon Certificate Manager ARN."
+    });    
+
+    const zoneId = new cdk.CfnParameter(this, "ZoneId", {
+      type: "String",
+      description: "The Route53 zone id."
+    });   
 
     // get the default VPC
     const vpc =  new ec2.Vpc(this, 'Vpc');
@@ -111,10 +117,10 @@ export class MLOpsRayStack extends cdk.Stack {
     raySecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(22), "Allow SSH from anyone");
 
     // create the User Pool Clients
-    const mlflowUserPoolClient = this._createUserPoolClient(MlopsApps.MLFLOW, userPool, props.domainName);
-    const tensorboardUserPoolClient = this._createUserPoolClient(MlopsApps.TENSORBOARD, userPool, props.domainName);
-    const dashboardUserPoolClient = this._createUserPoolClient(MlopsApps.DASHBOARD, userPool, props.domainName);
-    const jupyterUserPoolClient = this._createUserPoolClient(MlopsApps.JUPYTER, userPool, props.domainName);
+    const mlflowUserPoolClient = this._createUserPoolClient(MlopsApps.MLFLOW, userPool, domainName.valueAsString);
+    const tensorboardUserPoolClient = this._createUserPoolClient(MlopsApps.TENSORBOARD, userPool, domainName.valueAsString);
+    const dashboardUserPoolClient = this._createUserPoolClient(MlopsApps.DASHBOARD, userPool, domainName.valueAsString);
+    const jupyterUserPoolClient = this._createUserPoolClient(MlopsApps.JUPYTER, userPool, domainName.valueAsString);
 
     // Create the ALB
     const lb = new elbv2.ApplicationLoadBalancer(this, "ApplicationLoadBalancer", {
@@ -171,7 +177,7 @@ export class MLOpsRayStack extends cdk.Stack {
     });            
 
     // Load the Certificate for HTTPS
-    const certificate = acm.Certificate.fromCertificateArn(this, 'Certificate', props.certificateArn);    
+    const certificate = acm.Certificate.fromCertificateArn(this, 'Certificate', certificateArn.valueAsString);    
 
     // Create the listeners
     const listener = lb.addListener('Listener', {
@@ -184,7 +190,7 @@ export class MLOpsRayStack extends cdk.Stack {
     listener.addAction('MLFlowAction', {
       priority: 30,
       conditions: [
-        elbv2.ListenerCondition.hostHeaders([MlopsApps.MLFLOW + '.' + props.domainName])
+        elbv2.ListenerCondition.hostHeaders([MlopsApps.MLFLOW + '.' + domainName.valueAsString])
       ],
       action: new actions.AuthenticateCognitoAction({
         userPool,
@@ -197,7 +203,7 @@ export class MLOpsRayStack extends cdk.Stack {
     listener.addAction('TensorboardAction', {
       priority: 40,
       conditions: [
-          elbv2.ListenerCondition.hostHeaders([MlopsApps.TENSORBOARD + '.' + props.domainName])
+          elbv2.ListenerCondition.hostHeaders([MlopsApps.TENSORBOARD + '.' + domainName.valueAsString])
       ],
       action: new actions.AuthenticateCognitoAction({
         userPool,
@@ -210,7 +216,7 @@ export class MLOpsRayStack extends cdk.Stack {
     listener.addAction('JupyterAction', {
       priority: 20,
       conditions: [
-          elbv2.ListenerCondition.hostHeaders([MlopsApps.JUPYTER + '.' + props.domainName])
+          elbv2.ListenerCondition.hostHeaders([MlopsApps.JUPYTER + '.' + domainName.valueAsString])
       ],
       action: new actions.AuthenticateCognitoAction({
         userPool,
@@ -223,7 +229,7 @@ export class MLOpsRayStack extends cdk.Stack {
     listener.addAction('DashboardAction', {
       priority: 10,
       conditions: [
-          elbv2.ListenerCondition.hostHeaders([MlopsApps.DASHBOARD + '.' + props.domainName])
+          elbv2.ListenerCondition.hostHeaders([MlopsApps.DASHBOARD + '.' + domainName.valueAsString])
       ],
       action: new actions.AuthenticateCognitoAction({
         userPool,
@@ -235,31 +241,31 @@ export class MLOpsRayStack extends cdk.Stack {
 
     // Create the Route 53 DNS entries
     const zone = route53.HostedZone.fromHostedZoneAttributes(this, 'MyZone', {
-      zoneName: props.domainName,
-      hostedZoneId: props.hostedZone,
+      zoneName: domainName.valueAsString,
+      hostedZoneId: zoneId.valueAsString,
     });
 
     new route53.CnameRecord(this, "MLflowCnameRecord", {
       zone,
-      recordName: MlopsApps.MLFLOW + '.' + props.domainName,
+      recordName: MlopsApps.MLFLOW + '.' + domainName.valueAsString,
       domainName: lb.loadBalancerDnsName,
     });
 
     new route53.CnameRecord(this, "TensorboardCnameRecord", {
       zone,
-      recordName: MlopsApps.TENSORBOARD + '.' + props.domainName,
+      recordName: MlopsApps.TENSORBOARD + '.' + domainName.valueAsString,
       domainName: lb.loadBalancerDnsName,
     });
 
     new route53.CnameRecord(this, "JupyterCnameRecord", {
       zone,
-      recordName: MlopsApps.JUPYTER + '.' + props.domainName,
+      recordName: MlopsApps.JUPYTER + '.' + domainName.valueAsString,
       domainName: lb.loadBalancerDnsName,
     });
 
     new route53.CnameRecord(this, "DashboardCnameRecord", {
       zone,
-      recordName: MlopsApps.DASHBOARD + '.' + props.domainName,
+      recordName: MlopsApps.DASHBOARD + '.' + domainName.valueAsString,
       domainName: lb.loadBalancerDnsName,
     });
 
