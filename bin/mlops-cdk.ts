@@ -3,6 +3,7 @@ import 'source-map-support/register';
 import * as cdk from '@aws-cdk/core';
 
 import { MLOpsRayStack } from '../lib/mlops-ray-stack';
+import { MLOpsBaseStack } from '../lib/mlops-base-stack';
 
 const app = new cdk.App();
 
@@ -15,4 +16,13 @@ const env = {
   account: process.env.ACCOUNT_ID,
 };
 
-const rayStack = new MLOpsRayStack(app, 'MLOps-Ray-Stack', { env });
+const baseStack = new MLOpsBaseStack(app, "MLOps-Base-Stack", { env });
+
+const rayStack = new MLOpsRayStack(app, 'MLOps-Ray-Stack', { 
+  vpc: baseStack.vpc,
+  raySecurityGroup: baseStack.raySecurityGroup,
+  albSecurityGroup: baseStack.albSecurityGroup,
+  env, 
+});
+
+rayStack.addDependency(baseStack);

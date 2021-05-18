@@ -1,10 +1,8 @@
 #!/usr/bin/env node
 import * as cdk from '@aws-cdk/core';
-import * as s3 from '@aws-cdk/aws-s3';
 import * as cognito from '@aws-cdk/aws-cognito';
 import * as iam from '@aws-cdk/aws-iam';
 import * as ec2 from '@aws-cdk/aws-ec2';
-import * as efs from '@aws-cdk/aws-efs';
 import * as elbv2 from '@aws-cdk/aws-elasticloadbalancingv2';
 import * as acm from '@aws-cdk/aws-certificatemanager';
 import * as lambda from '@aws-cdk/aws-lambda';
@@ -12,272 +10,103 @@ import * as events from '@aws-cdk/aws-events';
 import * as targets from '@aws-cdk/aws-events-targets';
 import * as actions from '@aws-cdk/aws-elasticloadbalancingv2-actions';
 import * as route53 from '@aws-cdk/aws-route53';
+import * as ssm from '@aws-cdk/aws-ssm';
 
-import { join } from "path";
+var path = require('path');
 
-/**
- * The ports for each MLOps application.
- */
-export enum MlOpsPorts {
+export interface MLOpsRayStackProps extends cdk.StackProps {
 
-  MLFLOW = 5000,
+  vpc: ec2.IVpc;
 
-  JUPYTER = 8888,
+  raySecurityGroup: ec2.ISecurityGroup;
 
-  TENSORBOARD = 6006,
-
-  DASHBOARD = 8265,
-
-};
-
-/**
- * The names of each MLOps application.
- */
-export enum MlopsApps {
-
-  MLFLOW = "mlflow",
-
-  JUPYTER = "jupyter",
-
-  TENSORBOARD = "tensorboard",
-
-  DASHBOARD = "dashboard", 
+  albSecurityGroup: ec2.ISecurityGroup;
 
 }
 
 export class MLOpsRayStack extends cdk.Stack {
 
-  constructor(scope: cdk.Construct, id: string, props?: cdk.StackProps) {
+  private lb: elbv2.ApplicationLoadBalancer;
+
+  private userPool: cognito.IUserPool;
+
+  private userPoolDomain: cognito.IUserPoolDomain;
+
+  private listener: elbv2.ApplicationListener;
+
+  private zone: route53.IHostedZone;
+
+  private baseDomainName: string;
+
+  private priorityNumber: number = 1;
+
+  constructor(scope: cdk.Construct, id: string, props: MLOpsRayStackProps) {
     super(scope, id, props);
 
-    // get the input parameters
-    const domainName = new cdk.CfnParameter(this, "DomainName", {
-      type: "String",
-      description: "The base DNS domain name."
-    });
+    this.baseDomainName = ssm.StringParameter.valueForStringParameter(this, 'mlops-domain-name');
+    const zoneId = ssm.StringParameter.valueForStringParameter(this, 'mlops-zone-id');
+    const certificateArn = ssm.StringParameter.valueForStringParameter(this, 'mlops-cert-arn');
 
-    const certificateArn = new cdk.CfnParameter(this, "CertificateArn", {
-      type: "String",
-      description: "The Amazon Certificate Manager ARN."
-    });    
+    // get the UserPool Id from export value
+    this.userPool = cognito.UserPool.fromUserPoolId(this, "UserPool", cdk.Fn.importValue("MLOpsCognitoUserPoolId"));
 
-    const zoneId = new cdk.CfnParameter(this, "ZoneId", {
-      type: "String",
-      description: "The Route53 zone id."
-    });   
-
-    // get the default VPC
-    const vpc =  new ec2.Vpc(this, 'Vpc');
-
-    // create the source security group for the EFS
-    const sourceEfsSecurityGroup = new ec2.SecurityGroup(this, "SourceEfsSecurityGroup", {
-      vpc,
-    });
-
-    // create the destination security group for the EFS
-    const destEfsSecurityGroup = new ec2.SecurityGroup(this, "DestEfsSecurityGroup", {
-      vpc,
-      allowAllOutbound: false,
-    });
-    destEfsSecurityGroup.connections.allowFrom(sourceEfsSecurityGroup, ec2.Port.tcp(2049));
-
-    // create the EFS
-    const efsFileSystem = new efs.FileSystem(this, "FileSystem", {
-      vpc,
-      securityGroup: destEfsSecurityGroup,
-    });
-
-    // The S3 bucket where model artfifacts are stored
-    const s3Bucket = new s3.Bucket(this, 'MLFlowArtifactBucket', {
-      versioned: true
-    });
-
-    // The Cognito User Pool for authentication
-    const userPool = new cognito.UserPool(this, 'myuserpool', {
-      passwordPolicy: {
-        minLength: 16,
-        requireLowercase: false,
-        requireUppercase: false,
-        requireDigits: false,
-        requireSymbols: false,
-        tempPasswordValidity: cdk.Duration.days(3),
-      },
-      selfSignUpEnabled: false,
-      accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,     
-      signInAliases: { email: true },
-      autoVerify: { email: true },
-    });
-
-    // The Cognito user pool domain
-    const userPoolDomain = new cognito.UserPoolDomain(this, 'Domain', {
-      userPool,
-      cognitoDomain: {
-        domainPrefix: 'mlops-devpool',
-      },
-    }); 
-
-    //  Create the Ray Security Group
-    const raySecurityGroup = new ec2.SecurityGroup(this, "RaySecurityGroup", { vpc });
-    raySecurityGroup.addIngressRule(raySecurityGroup, ec2.Port.allTraffic(), "Ray security group");
-    raySecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(22), "Allow SSH from anyone");
-
-    // create the User Pool Clients
-    const mlflowUserPoolClient = this._createUserPoolClient(MlopsApps.MLFLOW, userPool, domainName.valueAsString);
-    const tensorboardUserPoolClient = this._createUserPoolClient(MlopsApps.TENSORBOARD, userPool, domainName.valueAsString);
-    const dashboardUserPoolClient = this._createUserPoolClient(MlopsApps.DASHBOARD, userPool, domainName.valueAsString);
-    const jupyterUserPoolClient = this._createUserPoolClient(MlopsApps.JUPYTER, userPool, domainName.valueAsString);
+    // get the User Pool Domain Name
+    this.userPoolDomain = cognito.UserPoolDomain.fromDomainName(this, "UserPoolDomain", cdk.Fn.importValue("MLOpsCognitoUserPoolDomain"));
 
     // Create the ALB
-    const lb = new elbv2.ApplicationLoadBalancer(this, "ApplicationLoadBalancer", {
+    this.lb = new elbv2.ApplicationLoadBalancer(this, "ApplicationLoadBalancer", {
         internetFacing: true,
-        vpc,
+        vpc: props.vpc,
+        securityGroup: props.albSecurityGroup,
     });
+
     // allow the ALB to call out to the Cognito service
-    lb.connections.allowToAnyIpv4(ec2.Port.tcp(443));
-    raySecurityGroup.connections.allowFrom(lb, ec2.Port.tcp(MlOpsPorts.JUPYTER));
-    raySecurityGroup.connections.allowFrom(lb, ec2.Port.tcp(MlOpsPorts.MLFLOW));
-    raySecurityGroup.connections.allowFrom(lb, ec2.Port.tcp(MlOpsPorts.DASHBOARD));
-    raySecurityGroup.connections.allowFrom(lb, ec2.Port.tcp(MlOpsPorts.TENSORBOARD));
+    /** 
+    this.lb.connections.allowToAnyIpv4(ec2.Port.tcp(443));
+    this.lb.connections.allowTo(props.raySecurityGroup, ec2.Port.tcp(MlOpsPorts.JUPYTER));
+
+    props.raySecurityGroup.connections.allowFrom(this.lb, ec2.Port.tcp(MlOpsPorts.JUPYTER));
+    props.raySecurityGroup.connections.allowFrom(this.lb, ec2.Port.tcp(MlOpsPorts.MLFLOW));
+    props.raySecurityGroup.connections.allowFrom(this.lb, ec2.Port.tcp(MlOpsPorts.DASHBOARD));
+    props.raySecurityGroup.connections.allowFrom(this.lb, ec2.Port.tcp(MlOpsPorts.TENSORBOARD));
+    props.raySecurityGroup.connections.allowFrom(this.lb, ec2.Port.tcp(MlOpsPorts.PROMETHEUS));
+    props.raySecurityGroup.connections.allowFrom(this.lb, ec2.Port.tcp(MlOpsPorts.GRAFANA));
+    */
 
     // create a redirect from 80 to 443
-    lb.addRedirect();
-
-    // Create the ALB Listeners
-    const mlflowTargetGroup = new elbv2.ApplicationTargetGroup(this, "MlflowTargetGroup", {
-        port: MlOpsPorts.MLFLOW,
-        vpc,
-        targetType: elbv2.TargetType.INSTANCE,
-        protocol: elbv2.ApplicationProtocol.HTTP,
-        healthCheck: {
-          healthyThresholdCount: 2,
-        },        
-    });
-    const tensorboardTargetGroup = new elbv2.ApplicationTargetGroup(this, "TensorboardTargetGroup", {
-        port: MlOpsPorts.TENSORBOARD,
-        vpc,
-        targetType: elbv2.TargetType.INSTANCE,
-        protocol: elbv2.ApplicationProtocol.HTTP,
-        healthCheck: {
-          healthyThresholdCount: 2,
-        },        
-    });
-    const dashboardTargetGroup = new elbv2.ApplicationTargetGroup(this, "DashboardTargetGroup", {
-        port: MlOpsPorts.DASHBOARD,
-        vpc,
-        targetType: elbv2.TargetType.INSTANCE,
-        protocol: elbv2.ApplicationProtocol.HTTP,
-        healthCheck: {
-          healthyThresholdCount: 2,
-        },        
-    });
-    const jupyterTargetGroup = new elbv2.ApplicationTargetGroup(this, "JupyterTargetGroup", {
-        port: MlOpsPorts.JUPYTER,
-        vpc,
-        targetType: elbv2.TargetType.INSTANCE,
-        protocol: elbv2.ApplicationProtocol.HTTP,
-        healthCheck: {
-          healthyHttpCodes: "200-302",
-          healthyThresholdCount: 2,
-        },
-    });            
+    this.lb.addRedirect();
 
     // Load the Certificate for HTTPS
-    const certificate = acm.Certificate.fromCertificateArn(this, 'Certificate', certificateArn.valueAsString);    
-
+    const certificate = acm.Certificate.fromCertificateArn(this, 'AcmCertificate', certificateArn);        
+    
     // Create the listeners
-    const listener = lb.addListener('Listener', {
+    this.listener = this.lb.addListener('AlbListener', {
         port: 443,
         open: true,
         certificates: [certificate],
-        defaultTargetGroups: [dashboardTargetGroup ],
+        defaultAction: elbv2.ListenerAction.fixedResponse(200, {
+          contentType: "text/plain",
+          messageBody: 'OK',
+        }),
     });
-
-    // Create an action per application
-    listener.addAction('MLFlowAction', {
-      priority: 30,
-      conditions: [
-        elbv2.ListenerCondition.hostHeaders([MlopsApps.MLFLOW + '.' + domainName.valueAsString])
-      ],
-      action: new actions.AuthenticateCognitoAction({
-        userPool,
-        userPoolClient: mlflowUserPoolClient,
-        userPoolDomain,
-        next: elbv2.ListenerAction.forward([mlflowTargetGroup]),
-      }),
-    });
-
-    listener.addAction('TensorboardAction', {
-      priority: 40,
-      conditions: [
-          elbv2.ListenerCondition.hostHeaders([MlopsApps.TENSORBOARD + '.' + domainName.valueAsString])
-      ],
-      action: new actions.AuthenticateCognitoAction({
-        userPool,
-        userPoolClient: tensorboardUserPoolClient,
-        userPoolDomain,
-        next: elbv2.ListenerAction.forward([tensorboardTargetGroup]),
-      }),
-    });    
-
-    listener.addAction('JupyterAction', {
-      priority: 20,
-      conditions: [
-          elbv2.ListenerCondition.hostHeaders([MlopsApps.JUPYTER + '.' + domainName.valueAsString])
-      ],
-      action: new actions.AuthenticateCognitoAction({
-        userPool,
-        userPoolClient: jupyterUserPoolClient,
-        userPoolDomain,
-        next: elbv2.ListenerAction.forward([jupyterTargetGroup]),
-      }),
-    });    
-
-    listener.addAction('DashboardAction', {
-      priority: 10,
-      conditions: [
-          elbv2.ListenerCondition.hostHeaders([MlopsApps.DASHBOARD + '.' + domainName.valueAsString])
-      ],
-      action: new actions.AuthenticateCognitoAction({
-        userPool,
-        userPoolClient: dashboardUserPoolClient,
-        userPoolDomain,
-        next: elbv2.ListenerAction.forward([dashboardTargetGroup]),
-      }),
-    });    
 
     // Create the Route 53 DNS entries
-    const zone = route53.HostedZone.fromHostedZoneAttributes(this, 'MyZone', {
-      zoneName: domainName.valueAsString,
-      hostedZoneId: zoneId.valueAsString,
+    this.zone = route53.HostedZone.fromHostedZoneAttributes(this, 'HostedZone', {
+      zoneName: this.baseDomainName,
+      hostedZoneId: zoneId,
     });
 
-    new route53.CnameRecord(this, "MLflowCnameRecord", {
-      zone,
-      recordName: MlopsApps.MLFLOW + '.' + domainName.valueAsString,
-      domainName: lb.loadBalancerDnsName,
-    });
-
-    new route53.CnameRecord(this, "TensorboardCnameRecord", {
-      zone,
-      recordName: MlopsApps.TENSORBOARD + '.' + domainName.valueAsString,
-      domainName: lb.loadBalancerDnsName,
-    });
-
-    new route53.CnameRecord(this, "JupyterCnameRecord", {
-      zone,
-      recordName: MlopsApps.JUPYTER + '.' + domainName.valueAsString,
-      domainName: lb.loadBalancerDnsName,
-    });
-
-    new route53.CnameRecord(this, "DashboardCnameRecord", {
-      zone,
-      recordName: MlopsApps.DASHBOARD + '.' + domainName.valueAsString,
-      domainName: lb.loadBalancerDnsName,
-    });
+    // create the MLOps applictions
+    const mlflowTargetGroup = this._createMlopsApplication(MlopsApps.MLFLOW, props.vpc, MlOpsPorts.MLFLOW, { healthyThresholdCount: 2 });
+    const tensorboardTargetGroup = this._createMlopsApplication(MlopsApps.TENSORBOARD, props.vpc, MlOpsPorts.TENSORBOARD, { healthyThresholdCount: 2 });
+    const dashboardTargetGroup = this._createMlopsApplication(MlopsApps.DASHBOARD, props.vpc, MlOpsPorts.DASHBOARD, { healthyThresholdCount: 2 });
+    const jupyterTargetGroup = this._createMlopsApplication(MlopsApps.JUPYTER, props.vpc, MlOpsPorts.JUPYTER, { healthyThresholdCount: 2, path: "/tree?" });  
+    const prometheusTargetGroup = this._createMlopsApplication(MlopsApps.PROMETHEUS, props.vpc, MlOpsPorts.PROMETHEUS, { healthyThresholdCount: 2, path: "/graph" });
+    const grafanaTargetGroup = this._createMlopsApplication(MlopsApps.GRAFANA, props.vpc, MlOpsPorts.GRAFANA, { healthyThresholdCount: 2, path: "/login" });    
 
     // Create the Lambda function to register the instance
     const fn = new lambda.Function(this, 'MyLambda', {
-        code: lambda.Code.fromAsset(join(__dirname, "..", 'lambda', 'ec2-event-processor')),
+        code: lambda.Code.fromAsset(path.join(__dirname, "..", 'lambda', 'ec2-event-processor')),
         handler: 'handler.lambda_handler',
         runtime: lambda.Runtime.PYTHON_3_7,
         environment: {
@@ -285,6 +114,8 @@ export class MLOpsRayStack extends cdk.Stack {
             TENSORBOARD_TARGET_GROUP_ARN: tensorboardTargetGroup.targetGroupArn,
             RAY_DASHBOARD_TARGET_GROUP_ARN: dashboardTargetGroup.targetGroupArn,
             JUPYTER_TARGET_GROUP_ARN: jupyterTargetGroup.targetGroupArn,
+            PROMETHEUS_TARGET_GROUP_ARN: prometheusTargetGroup.targetGroupArn,
+            GRAFANA_TARGET_GROUP_ARN: grafanaTargetGroup.targetGroupArn,
         }
     });
 
@@ -294,7 +125,8 @@ export class MLOpsRayStack extends cdk.Stack {
         actions: ['ec2:DescribeInstances']
     }));
     fn.role?.addToPrincipalPolicy(new iam.PolicyStatement({
-        resources: [ mlflowTargetGroup.targetGroupArn, tensorboardTargetGroup.targetGroupArn, dashboardTargetGroup.targetGroupArn, jupyterTargetGroup.targetGroupArn ],
+        resources: [ mlflowTargetGroup.targetGroupArn, tensorboardTargetGroup.targetGroupArn, dashboardTargetGroup.targetGroupArn, 
+          jupyterTargetGroup.targetGroupArn, prometheusTargetGroup.targetGroupArn, grafanaTargetGroup.targetGroupArn ],
         actions: [ 'elasticloadbalancing:DeregisterTargets', 'elasticloadbalancing:RegisterTargets' ]
       }
     ));
@@ -313,34 +145,26 @@ export class MLOpsRayStack extends cdk.Stack {
         retryAttempts: 2, // Optional: set the max number of retry attempts
     }));      
 
-    // Define the CFN outputs    
-    new cdk.CfnOutput(this, "S3Bucket", {
-      value: s3Bucket.bucketName,
-    });
-
-    new cdk.CfnOutput(this, "AlbDnsName", {
-      value: lb.loadBalancerDnsName,
-    });
-
-    new cdk.CfnOutput(this, "EfsFileSystem", {
-      value: efsFileSystem.fileSystemId,
-    });
-
+    new cdk.CfnOutput(this, "AlbDnsNameOutput", {
+      value: this.lb.loadBalancerDnsName,
+    }); 
   }
 
   /**
-   * Create the Cognito User Pool Client for one of the applications
+   * Create the MLOps application
    * 
-   * @param name - the name of the application. 
-   * @param userPool - the Cognito user pool.
-   * @param baseDomain - the base DNS domain name.
-   * @returns a new Cognito User Pool Client resource
+   * @param name - the name of the MLOps application 
+   * @param port - the port of the MLOps application
+   * @param healthCheck - the healthcheck config
+   * @returns the ALB Target Group
    */
-  private _createUserPoolClient(name: string, userPool: cognito.UserPool, baseDomain: string) {
+  private _createMlopsApplication(name: string, vpc: ec2.IVpc, port: number, healthCheck?: elbv2.HealthCheck) {
+
+    let domainName = name + '.' + this.baseDomainName;
 
     // Create Cognito User Pool clients for each endpoint
-    return new cognito.UserPoolClient(this, name + 'UserPoolClient', {
-      userPool,
+    let userPoolClient = new cognito.UserPoolClient(this, name + 'UserPoolClient', {
+      userPool: this.userPool,
       userPoolClientName: name + "UserPoolClient",
       authFlows: {
         userPassword: true
@@ -350,12 +174,82 @@ export class MLOpsRayStack extends cdk.Stack {
           authorizationCodeGrant: true,
         },
         scopes: [ cognito.OAuthScope.EMAIL, cognito.OAuthScope.OPENID, cognito.OAuthScope.PROFILE, cognito.OAuthScope.COGNITO_ADMIN ],
-        callbackUrls: [ 'https://' + name + "." + baseDomain + '/oauth2/idpresponse' ]
+        callbackUrls: [ 'https://' + domainName + '/oauth2/idpresponse' ]
       },
       supportedIdentityProviders: [ cognito.UserPoolClientIdentityProvider.COGNITO ],
       refreshTokenValidity: cdk.Duration.days(1),
       generateSecret: true,
     });
-  }
 
+    // Create the ALB Listeners
+    let targetGroup = new elbv2.ApplicationTargetGroup(this, name + "TargetGroup", {
+        port,
+        vpc,
+        targetType: elbv2.TargetType.INSTANCE,
+        protocol: elbv2.ApplicationProtocol.HTTP,
+        healthCheck,        
+    });
+
+    // Create an action per application
+    this.listener.addAction(name + 'Action', {
+      priority: this.priorityNumber++,
+      conditions: [
+        elbv2.ListenerCondition.hostHeaders([domainName])
+      ],
+      action: new actions.AuthenticateCognitoAction({
+        userPool: this.userPool,
+        userPoolClient: userPoolClient,
+        userPoolDomain: this.userPoolDomain,
+        next: elbv2.ListenerAction.forward([targetGroup]),
+      }),
+    });
+
+    // Create the CNAME DNS record
+    new route53.CnameRecord(this, name + "CnameRecord", {
+      zone: this.zone,
+      recordName: domainName,
+      domainName: this.lb.loadBalancerDnsName,
+    });
+
+    // return the target group
+    return targetGroup;
+  }
 }
+
+/**
+ * The ports for each MLOps application.
+ */
+ export enum MlOpsPorts {
+
+  MLFLOW = 5000,
+
+  JUPYTER = 8888,
+
+  TENSORBOARD = 6006,
+
+  DASHBOARD = 8265,
+
+  PROMETHEUS = 9090,
+
+  GRAFANA = 3000,
+
+};
+
+/**
+ * The names of each MLOps application.
+ */
+export enum MlopsApps {
+
+  MLFLOW = "mlflow",
+
+  JUPYTER = "jupyter",
+
+  TENSORBOARD = "tensorboard",
+
+  DASHBOARD = "dashboard", 
+
+  PROMETHEUS = "prometheus",
+
+  GRAFANA = "grafana",
+
+};
