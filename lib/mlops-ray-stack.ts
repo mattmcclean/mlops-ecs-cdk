@@ -149,7 +149,7 @@ export class MLOpsRayStack extends cdk.Stack {
         targetType: elbv2.TargetType.INSTANCE,
         protocol: elbv2.ApplicationProtocol.HTTP,
         healthCheck: {
-          healthyThresholdCount: 3,
+          healthyThresholdCount: 2,
         },        
     });
     const tensorboardTargetGroup = new elbv2.ApplicationTargetGroup(this, "TensorboardTargetGroup", {
@@ -158,7 +158,7 @@ export class MLOpsRayStack extends cdk.Stack {
         targetType: elbv2.TargetType.INSTANCE,
         protocol: elbv2.ApplicationProtocol.HTTP,
         healthCheck: {
-          healthyThresholdCount: 3,
+          healthyThresholdCount: 2,
         },        
     });
     const dashboardTargetGroup = new elbv2.ApplicationTargetGroup(this, "DashboardTargetGroup", {
@@ -167,7 +167,7 @@ export class MLOpsRayStack extends cdk.Stack {
         targetType: elbv2.TargetType.INSTANCE,
         protocol: elbv2.ApplicationProtocol.HTTP,
         healthCheck: {
-          healthyThresholdCount: 3,
+          healthyThresholdCount: 2,
         },        
     });
     const jupyterTargetGroup = new elbv2.ApplicationTargetGroup(this, "JupyterTargetGroup", {
@@ -177,7 +177,7 @@ export class MLOpsRayStack extends cdk.Stack {
         protocol: elbv2.ApplicationProtocol.HTTP,
         healthCheck: {
           healthyHttpCodes: "200-302",
-          healthyThresholdCount: 3,
+          healthyThresholdCount: 2,
         },
     });            
 
