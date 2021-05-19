@@ -60,19 +60,6 @@ export class MLOpsRayStack extends cdk.Stack {
         securityGroup: props.albSecurityGroup,
     });
 
-    // allow the ALB to call out to the Cognito service
-    /** 
-    this.lb.connections.allowToAnyIpv4(ec2.Port.tcp(443));
-    this.lb.connections.allowTo(props.raySecurityGroup, ec2.Port.tcp(MlOpsPorts.JUPYTER));
-
-    props.raySecurityGroup.connections.allowFrom(this.lb, ec2.Port.tcp(MlOpsPorts.JUPYTER));
-    props.raySecurityGroup.connections.allowFrom(this.lb, ec2.Port.tcp(MlOpsPorts.MLFLOW));
-    props.raySecurityGroup.connections.allowFrom(this.lb, ec2.Port.tcp(MlOpsPorts.DASHBOARD));
-    props.raySecurityGroup.connections.allowFrom(this.lb, ec2.Port.tcp(MlOpsPorts.TENSORBOARD));
-    props.raySecurityGroup.connections.allowFrom(this.lb, ec2.Port.tcp(MlOpsPorts.PROMETHEUS));
-    props.raySecurityGroup.connections.allowFrom(this.lb, ec2.Port.tcp(MlOpsPorts.GRAFANA));
-    */
-
     // create a redirect from 80 to 443
     this.lb.addRedirect();
 
@@ -101,8 +88,7 @@ export class MLOpsRayStack extends cdk.Stack {
     const tensorboardTargetGroup = this._createMlopsApplication(MlopsApps.TENSORBOARD, props.vpc, MlOpsPorts.TENSORBOARD, { healthyThresholdCount: 2 });
     const dashboardTargetGroup = this._createMlopsApplication(MlopsApps.DASHBOARD, props.vpc, MlOpsPorts.DASHBOARD, { healthyThresholdCount: 2 });
     const jupyterTargetGroup = this._createMlopsApplication(MlopsApps.JUPYTER, props.vpc, MlOpsPorts.JUPYTER, { healthyThresholdCount: 2, path: "/tree?" });  
-    const prometheusTargetGroup = this._createMlopsApplication(MlopsApps.PROMETHEUS, props.vpc, MlOpsPorts.PROMETHEUS, { healthyThresholdCount: 2, path: "/graph" });
-    const grafanaTargetGroup = this._createMlopsApplication(MlopsApps.GRAFANA, props.vpc, MlOpsPorts.GRAFANA, { healthyThresholdCount: 2, path: "/login" });    
+    const prometheusTargetGroup = this._createMlopsApplication(MlopsApps.PROMETHEUS, props.vpc, MlOpsPorts.PROMETHEUS, { healthyThresholdCount: 2, path: "/graph" });   
 
     // Create the Lambda function to register the instance
     const fn = new lambda.Function(this, 'MyLambda', {
@@ -115,7 +101,6 @@ export class MLOpsRayStack extends cdk.Stack {
             RAY_DASHBOARD_TARGET_GROUP_ARN: dashboardTargetGroup.targetGroupArn,
             JUPYTER_TARGET_GROUP_ARN: jupyterTargetGroup.targetGroupArn,
             PROMETHEUS_TARGET_GROUP_ARN: prometheusTargetGroup.targetGroupArn,
-            GRAFANA_TARGET_GROUP_ARN: grafanaTargetGroup.targetGroupArn,
         }
     });
 
@@ -125,8 +110,13 @@ export class MLOpsRayStack extends cdk.Stack {
         actions: ['ec2:DescribeInstances']
     }));
     fn.role?.addToPrincipalPolicy(new iam.PolicyStatement({
-        resources: [ mlflowTargetGroup.targetGroupArn, tensorboardTargetGroup.targetGroupArn, dashboardTargetGroup.targetGroupArn, 
-          jupyterTargetGroup.targetGroupArn, prometheusTargetGroup.targetGroupArn, grafanaTargetGroup.targetGroupArn ],
+        resources: [ 
+          mlflowTargetGroup.targetGroupArn, 
+          tensorboardTargetGroup.targetGroupArn, 
+          dashboardTargetGroup.targetGroupArn, 
+          jupyterTargetGroup.targetGroupArn, 
+          prometheusTargetGroup.targetGroupArn, 
+        ],
         actions: [ 'elasticloadbalancing:DeregisterTargets', 'elasticloadbalancing:RegisterTargets' ]
       }
     ));
