@@ -221,8 +221,6 @@ export class MLOpsRayStack extends cdk.Stack {
 
   PROMETHEUS = 9090,
 
-  GRAFANA = 3000,
-
 };
 
 /**
@@ -239,7 +237,5 @@ export enum MlopsApps {
   DASHBOARD = "dashboard", 
 
   PROMETHEUS = "prometheus",
-
-  GRAFANA = "grafana",
 
 };

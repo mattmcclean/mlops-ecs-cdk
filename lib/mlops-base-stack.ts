@@ -4,6 +4,7 @@ import * as s3 from '@aws-cdk/aws-s3';
 import * as cognito from '@aws-cdk/aws-cognito';
 import * as ec2 from '@aws-cdk/aws-ec2';
 import * as efs from '@aws-cdk/aws-efs';
+import * as iam from '@aws-cdk/aws-iam';
 
 export class MLOpsBaseStack extends cdk.Stack {
 
@@ -27,9 +28,7 @@ export class MLOpsBaseStack extends cdk.Stack {
     super(scope, id, props);
 
     // get the default VPC
-    this.vpc =  new ec2.Vpc(this, 'Vpc', {
-        maxAzs: 2,
-    });
+    this.vpc =  new ec2.Vpc(this, 'Vpc');
 
     // create the source security group for the EFS
     this.sourceEfsSecurityGroup = new ec2.SecurityGroup(this, "SourceEfsSecurityGroup", {
@@ -53,8 +52,18 @@ export class MLOpsBaseStack extends cdk.Stack {
     this.albSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), "Allow HTTP from anyone");
     this.albSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), "Allow HTTPS from anyone");
     this.albSecurityGroup.addEgressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), "Allow HTTP to anyone");
-    this.albSecurityGroup.addEgressRule(this.raySecurityGroup, ec2.Port.allTraffic(), "Allow traffic to Ray cluster");
-    this.raySecurityGroup.addIngressRule(this.albSecurityGroup, ec2.Port.allTraffic(), "Allow traffic from ALB");
+
+    // Setup the ports to the various applications
+    this.albSecurityGroup.addEgressRule(this.raySecurityGroup, ec2.Port.tcp(5000), "Allow traffic to mlflow service");
+    this.raySecurityGroup.addIngressRule(this.albSecurityGroup, ec2.Port.tcp(5000), "Allow traffic to mlflow service");
+    this.albSecurityGroup.addEgressRule(this.raySecurityGroup, ec2.Port.tcp(8888), "Allow traffic to jupyter service");
+    this.raySecurityGroup.addIngressRule(this.albSecurityGroup, ec2.Port.tcp(8888), "Allow traffic to jupyter service");
+    this.albSecurityGroup.addEgressRule(this.raySecurityGroup, ec2.Port.tcp(6006), "Allow traffic to tensorboard service");
+    this.raySecurityGroup.addIngressRule(this.albSecurityGroup, ec2.Port.tcp(6006), "Allow traffic to tensorboard service");
+    this.albSecurityGroup.addEgressRule(this.raySecurityGroup, ec2.Port.tcp(8265), "Allow traffic to ray dashboard service");
+    this.raySecurityGroup.addIngressRule(this.albSecurityGroup, ec2.Port.tcp(8265), "Allow traffic to ray dashboard service");        
+    this.albSecurityGroup.addEgressRule(this.raySecurityGroup, ec2.Port.tcp(9090), "Allow traffic to prometheus service");
+    this.raySecurityGroup.addIngressRule(this.albSecurityGroup, ec2.Port.tcp(9090), "Allow traffic to prometheus service");   
 
     // create the EFS
     this.efsFileSystem = new efs.FileSystem(this, "FileSystem", {
@@ -91,6 +100,33 @@ export class MLOpsBaseStack extends cdk.Stack {
       },
     });
 
+    // Create the Launch Templates
+    const setupCommands = ec2.UserData.forLinux();
+    setupCommands.addCommands('echo "' + this.efsFileSystem.fileSystemId  + '.efs.'+ cdk.Stack.of(this).region + '.amazonaws.com:/ /mnt/efs nfs4 nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2 0 0" >> /etc/fstab');
+
+    const headNodeLaunchTemplate = new ec2.LaunchTemplate(this, "HeadNodeLaunchTemplate", {
+      userData: setupCommands,
+      blockDevices: [
+        {
+          deviceName: '/dev/sda1',
+          volume: ec2.BlockDeviceVolume.ebs(200),
+        },     
+      ]
+    });
+
+    const workerNodeLaunchTemplate = new ec2.LaunchTemplate(this, "WorkerNodeLaunchTemplate", {
+      role: iam.Role.fromRoleArn(this, "WorkerNodeRole", `arn:aws:iam::${cdk.Stack.of(this).account}:role/ray-worker-v1`),
+      spotOptions: {
+        requestType: ec2.SpotRequestType.ONE_TIME,
+      },
+      blockDevices: [
+        {
+          deviceName: '/dev/sda1',
+          volume: ec2.BlockDeviceVolume.ebs(150),
+        },     
+      ],
+    });
+
     // Define the CFN outputs    
     new cdk.CfnOutput(this, "CognitoUserPoolIdOutput", {
       value: this.userPool.userPoolId,
@@ -117,5 +153,30 @@ export class MLOpsBaseStack extends cdk.Stack {
     new cdk.CfnOutput(this, "RaySecurityGroupOutput", {
       value: this.raySecurityGroup.securityGroupId,
     });       
+
+    let headNodeLaunchTemplateOutput;
+    if (headNodeLaunchTemplate.launchTemplateId) {
+      headNodeLaunchTemplateOutput = `LaunchTemplateId=${headNodeLaunchTemplate.launchTemplateId}`
+    } else {
+      headNodeLaunchTemplateOutput = `LaunchTemplateName=${headNodeLaunchTemplate.launchTemplateName}`
+    }
+    headNodeLaunchTemplateOutput=`${headNodeLaunchTemplateOutput},Version=${headNodeLaunchTemplate.latestVersionNumber}`
+
+    new cdk.CfnOutput(this, "RayHeadNodeLaunchTemplateOutput", {
+      value: headNodeLaunchTemplateOutput,
+    });  
+
+    let workerNodeLaunchTemplateOutput;
+    if (workerNodeLaunchTemplate.launchTemplateId) {
+      workerNodeLaunchTemplateOutput = `LaunchTemplateId=${workerNodeLaunchTemplate.launchTemplateId}`
+    } else {
+      workerNodeLaunchTemplateOutput = `LaunchTemplateName=${workerNodeLaunchTemplate.launchTemplateName}`
+    }
+    workerNodeLaunchTemplateOutput=`${workerNodeLaunchTemplateOutput},Version=${workerNodeLaunchTemplate.latestVersionNumber}`
+
+    new cdk.CfnOutput(this, "RayWorkerNodeLaunchTemplateOutput", {
+      value: workerNodeLaunchTemplateOutput,
+    });      
+
   }
 }
