@@ -4,6 +4,7 @@ import * as cdk from '@aws-cdk/core';
 
 import { MLOpsRayStack } from '../lib/mlops-ray-stack';
 import { MLOpsBaseStack } from '../lib/mlops-base-stack';
+import { MLOpsRdsStack } from '../lib/mlops-rds-stack';
 
 const app = new cdk.App();
 
@@ -26,3 +27,11 @@ const rayStack = new MLOpsRayStack(app, 'MLOps-Ray-Stack', {
 });
 
 rayStack.addDependency(baseStack);
+
+const rdsStack = new MLOpsRdsStack(app, "MLOps-Rds-Stack", { 
+  env, 
+  vpc: baseStack.vpc,
+  sourceSg: baseStack.raySecurityGroup,
+});
+
+rdsStack.addDependency(baseStack);
